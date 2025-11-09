@@ -90,7 +90,7 @@ const registerSchema = Joi.object({
 });
 
 const loginSchema = Joi.object({
-  username: Joi.string()
+  user_id: Joi.string()
     .trim()
     .required()
     .messages({
@@ -166,10 +166,10 @@ router.post('/login', loginLimiter, async (req, res) => {
       return res.status(400).json({ error: error.details[0].message });
     }
 
-    const { username, password } = value;
+    const { user_id, password } = value;
 
     // 사용자 찾기
-    const user = await User.findOne({ username });
+    const user = await User.findOne({ user_id });
     if (!user) {
       return res.status(401).json({ error: '사용자명 또는 비밀번호가 올바르지 않습니다.' });
     }
@@ -183,7 +183,8 @@ router.post('/login', loginLimiter, async (req, res) => {
     // 세션에 사용자 정보 저장
     req.session.user = {
       id: user._id.toString(),
-      username: user.username
+      username: user.username,
+      user_id: user.user_id
     };
 
     res.json({ 
@@ -200,13 +201,18 @@ router.post('/login', loginLimiter, async (req, res) => {
 });
 
 // 로그인 상태 확인
-router.get('/me', (req, res) => {
+router.get('/me', async (req, res) => {
   if (req.session.user) {
+    const user = await User.findOne({ user_id: req.session.user.user_id });
     res.json({ 
       loggedIn: true, 
       user: {
-        id: req.session.user.id,
-        username: req.session.user.username
+        id: user.id,
+        username: user.username,
+        age: user.age,
+        nationality: user.nationality,
+        gender: user.gender,
+        contact_method: user.contact_method
       }
     });
   } else {

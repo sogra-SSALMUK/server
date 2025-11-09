@@ -3,6 +3,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const session = require('express-session');
 const rateLimit = require('express-rate-limit');
+const cors = require('cors');
 const authRoutes = require('./routes/auth');
 const placeRoutes = require('./routes/places');
 const queueRoutes = require('./routes/queue');
@@ -10,6 +11,12 @@ const matchRoutes = require('./routes/match');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// CORS 옵션 설정
+const corsOptions = {
+  origin: process.env.CLIENT_URL || 'http://localhost:3000',
+  credentials: true, // 쿠키 및 인증 헤더 허용
+};
 
 // 기본 Rate Limiter (모든 API에 적용)
 const generalLimiter = rateLimit({
@@ -23,6 +30,7 @@ const generalLimiter = rateLimit({
 });
 
 // 미들웨어 설정
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -66,6 +74,12 @@ app.use('/api/match', matchRoutes);
 app.get('/', (req, res) => {
   res.json({ message: '서버가 정상적으로 실행 중입니다.' });
 });
+
+app.use((err, req, res, next) => {
+    console.log(err);
+    const { message = 'oh no, Error!!', statusCode = 500 } = err;
+    res.status(statusCode).json({ error: err, success: false });
+})
 
 app.listen(PORT, () => {
   console.log(`서버가 포트 ${PORT}에서 실행 중입니다.`);

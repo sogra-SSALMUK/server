@@ -1,8 +1,10 @@
 const express = require('express');
 const router = express.Router();
+const mongoose = require('mongoose');
 const Match = require('../models/Match');
 const Queue = require('../models/Queue');
 const User = require('../models/User');
+const Place = require('../models/Place');
 
 // 내 매칭 목록 조회 (로그인 필요)
 router.get('/me', async (req, res) => {
@@ -213,91 +215,88 @@ router.get('/:id/contact', async (req, res) => {
   }
 });
 
-// 매칭 생성 (랜덤 매칭 로직)
-router.post('/create', async (req, res) => {
+// 매칭 요청 (랜덤 매칭 또는 큐 추가)
+router.post('/request', async (req, res) => {
   try {
-    // 로그인 확인
+    // 1. 로그인 확인
     if (!req.session.user) {
       return res.status(401).json({ error: '로그인이 필요합니다.' });
     }
-
-    const user_id = req.session.user.id;
+    const userId = req.session.user.id;
     const { place_id } = req.body;
 
-    if (!place_id) {
-      return res.status(400).json({ error: 'Place ID를 입력해주세요.' });
+    // 2. place_id 유효성 검사
+    if (!place_id || !mongoose.Types.ObjectId.isValid(place_id)) {
+      return res.status(400).json({ error: '올바른 Place ID를 입력해주세요.' });
     }
 
-    // 현재 사용자의 active queue 확인
-    const myQueue = await Queue.findOne({
-      user: user_id,
-      place: place_id,
-      status: 'active'
-    });
-
-    if (!myQueue) {
-      return res.status(400).json({ error: '해당 Place가 Queue에 없습니다.' });
+    // 3. 해당 장소에 대한 사용자의 활성 큐 또는 매칭이 있는지 확인
+    const existingQueue = await Queue.findOne({ user: userId, place: place_id, status: 'active' });
+    if (existingQueue) {
+      return res.status(400).json({ error: '이미 이 장소의 매칭 대기열에 있습니다.' });
     }
-
-    // 같은 place의 다른 active queue 찾기 (자기 자신 제외, 이미 매칭된 사용자 제외)
-    const existingMatches = await Match.find({
+    const existingMatch = await Match.findOne({
       place: place_id,
-      $or: [{ user1: user_id }, { user2: user_id }],
+      $or: [{ user1: userId }, { user2: userId }],
       status: { $ne: 'rejected' }
     });
+    if (existingMatch) {
+      return res.status(400).json({ error: '이미 이 장소에 대한 매칭이 존재합니다.' });
+    }
 
-    const matchedUserIds = new Set();
-    existingMatches.forEach(match => {
-      matchedUserIds.add(match.user1.toString());
-      matchedUserIds.add(match.user2.toString());
-    });
-
-    const otherQueues = await Queue.find({
+    // 4. 같은 장소의 대기열에서 다른 사용자 찾기
+    const otherQueue = await Queue.findOne({
       place: place_id,
       status: 'active',
-      user: { $ne: user_id, $nin: Array.from(matchedUserIds) }
-    }).populate('user');
+      user: { $ne: userId }
+    });
 
-    if (otherQueues.length === 0) {
-      return res.status(404).json({ error: '매칭 가능한 사용자가 없습니다.' });
+    // 5. 다른 사용자가 있으면 매칭 생성
+    if (otherQueue) {
+      const matchedUserId = otherQueue.user;
+
+      const newMatch = new Match({
+        user1: userId,
+        user2: matchedUserId,
+        place: place_id,
+      });
+      await newMatch.save();
+
+      // 상대방의 큐 상태 업데이트
+      otherQueue.status = 'matched';
+      await otherQueue.save();
+
+      const populatedMatch = await Match.findById(newMatch._id)
+        .populate('user1', 'username user_id nationality gender age')
+        .populate('user2', 'username user_id nationality gender age')
+        .populate('place', '-__v');
+
+      return res.status(201).json({
+        message: '매칭에 성공했습니다!',
+        matched: true,
+        match: populatedMatch
+      });
+    } else {
+      // 6. 대기열에 다른 사용자가 없으면 현재 사용자를 큐에 추가
+      const newQueue = new Queue({
+        user: userId,
+        place: place_id,
+        status: 'active'
+      });
+      await newQueue.save();
+
+      return res.status(200).json({
+        message: '매칭 가능한 사용자가 없어 대기열에 추가되었습니다.',
+        matched: false,
+        queue: newQueue
+      });
     }
-
-    // 랜덤 선택
-    const randomIndex = Math.floor(Math.random() * otherQueues.length);
-    const matchedQueue = otherQueues[randomIndex];
-    const matchedUserId = matchedQueue.user._id || matchedQueue.user;
-
-    // Match 생성
-    const match = new Match({
-      user1: user_id,
-      user2: matchedUserId,
-      place: place_id,
-      status: 'pending'
-    });
-
-    await match.save();
-
-    // Queue 상태 업데이트
-    myQueue.status = 'matched';
-    matchedQueue.status = 'matched';
-    await Promise.all([myQueue.save(), matchedQueue.save()]);
-
-    // 매칭 정보 반환
-    const populatedMatch = await Match.findById(match._id)
-      .populate('user1', 'username user_id nationality gender age')
-      .populate('user2', 'username user_id nationality gender age')
-      .populate('place', '-__v');
-
-    res.status(201).json({
-      message: '매칭이 생성되었습니다.',
-      match: populatedMatch
-    });
   } catch (error) {
-    console.error('매칭 생성 오류:', error);
-    if (error.code === 11000) {
-      return res.status(400).json({ error: '이미 매칭된 사용자입니다.' });
+    console.error('매칭 요청 오류:', error);
+    if (error.code === 11000) { // 중복 키 오류
+      return res.status(400).json({ error: '이미 대기열에 있거나 매칭된 상태입니다.' });
     }
-    res.status(500).json({ error: '매칭 생성 중 오류가 발생했습니다.' });
+    res.status(500).json({ error: '매칭 요청 중 오류가 발생했습니다.' });
   }
 });
 

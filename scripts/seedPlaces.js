@@ -38,18 +38,24 @@ async function startInput() {
       
       const title = await question('행사 제목 (title): ');
       const addr = await question('주소 (addr): ');
-      const dateStr = await question('행사 날짜 (YYYY-MM-DD 또는 YYYY-MM-DD HH:mm): ');
+      const stDateStr = await question('행사 시작 날짜 (YYYY-MM-DD 또는 YYYY-MM-DD HH:mm): ');
+      const endDateStr = await question('행사 종료 날짜 (YYYY-MM-DD 또는 YYYY-MM-DD HH:mm): ');
       const latStr = await question('위도 (lat): ');
       const lngStr = await question('경도 (lng): ');
       const category = await question('카테고리 (category): ');
       const imageUrl = await question('이미지 URL (선택사항, Enter로 건너뛰기): ');
 
       // 날짜 파싱
-      let date;
-      if (dateStr.includes(' ')) {
-        date = new Date(dateStr);
+      let st_date, end_date;
+      if (stDateStr.includes(' ')) {
+        st_date = new Date(stDateStr);
       } else {
-        date = new Date(dateStr + 'T00:00:00');
+        st_date = new Date(stDateStr + 'T00:00:00');
+      }
+      if (endDateStr.includes(' ')) {
+        end_date = new Date(endDateStr);
+      } else {
+        end_date = new Date(endDateStr + 'T00:00:00');
       }
 
       // 숫자 변환
@@ -72,7 +78,7 @@ async function startInput() {
         continue;
       }
 
-      if (isNaN(date.getTime())) {
+      if (isNaN(st_date.getTime()) || isNaN(end_date.getTime())) {
         console.log('❌ 올바른 날짜 형식이 아닙니다.');
         continue;
       }
@@ -80,7 +86,8 @@ async function startInput() {
       const placeData = {
         title: title.trim(),
         addr: addr.trim(),
-        date,
+        st_date,
+        end_date,
         lat,
         lng,
         category: category.trim()
@@ -117,7 +124,8 @@ async function startInput() {
     savedPlaces.forEach((place, index) => {
       console.log(`${index + 1}. ${place.title}`);
       console.log(`   주소: ${place.addr}`);
-      console.log(`   날짜: ${place.date.toLocaleString('ko-KR')}`);
+      console.log(`   시작 날짜: ${place.st_date.toLocaleString('ko-KR')}`);
+      console.log(`   종료 날짜: ${place.end_date.toLocaleString('ko-KR')}`);
       console.log(`   위치: (${place.lat}, ${place.lng})`);
       console.log(`   카테고리: ${place.category}\n`);
     });

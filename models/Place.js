@@ -11,7 +11,11 @@ const placeSchema = new mongoose.Schema({
     required: true,
     trim: true
   },
-  date: {
+  st_date: {
+    type: Date,
+    required: true
+  },
+  end_date: {
     type: Date,
     required: true
   },
